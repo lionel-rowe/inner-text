@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>fixture</title>
+	</head>
+	<body>
+		<div class="content">
+			<section id="white-space" data-test-id="white-space">
+				<h2>White space</h2>
+				<p data-test-id="white-space-123">
+					one <span>two
+					</span> three<br>four
+				</p>
+				<div style="display: flex; gap: 1em">
+					<div>flex item</div>
+					<div>flex item 2</div>
+				</div>
+				<script>
+					42
+				</script>
+				<table>
+					<tr>
+						<td>table cell 1</td>
+						<td>table cell 2</td>
+					</tr>
+				</table>
+				<div data-test-id="split-text">split text data</div>
+				<script id="split-text-script">
+					document.querySelector('[data-test-id="split-text"]').firstChild.splitText(5)
+				</script>
+				<div>a&NewLine;b</div>
+				<pre>a&NewLine;b</pre>
+				<p>
+					a b c
+				</p>
+			</section>
+
+			<script type="module">
+				import { renderedTextCollectionSteps, toInnerText } from './script.mjs'
+				window.renderedTextCollectionSteps = renderedTextCollectionSteps
+				window.toInnerText = toInnerText
+			</script>
+			<script type="module" src="./wpt.mjs"></script>
+		</div>
+	</body>
+</html>
