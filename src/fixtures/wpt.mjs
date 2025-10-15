@@ -1,49 +1,44 @@
-// https://github.com/web-platform-tests/wpt/blob/08c1ff3cb33dd06fdb2713b38430e5ef1b9b9af4/html/dom/elements/the-innertext-and-outertext-properties/getter.html
-// https://github.com/web-platform-tests/wpt/blob/08c1ff3cb33dd06fdb2713b38430e5ef1b9b9af4/html/dom/elements/the-innertext-and-outertext-properties/getter-tests.js
+// Web Platform Tests
+// Modified from
+// https://github.com/web-platform-tests/wpt/blob/08c1ff3cb33d/html/dom/elements/the-innertext-and-outertext-properties/getter.html
+// https://github.com/web-platform-tests/wpt/blob/08c1ff3cb33d/html/dom/elements/the-innertext-and-outertext-properties/getter-tests.js
+// 3-Clause BSD License https://opensource.org/license/bsd-3-clause
 
-document.body.insertAdjacentHTML('beforeend', `
+document.body.insertAdjacentHTML(
+	'beforeend',
+	`
 	<div>
 		<style>
-			.before::before {
-				content: 'abc';
-			}
-			.table {
-				display: table;
-			}
-			.itable {
-				display: inline-table;
-			}
-			.row {
-				display: table-row;
-			}
-			.cell {
-				display: table-cell;
-			}
-			.first-line-uppercase::first-line {
-				text-transform: uppercase;
-			}
-			.first-letter-uppercase::first-letter {
-				text-transform: uppercase;
-			}
-			.first-letter-float::first-letter {
-				float: left;
-			}
+			.before::before { content: 'abc'; }
+			.table { display: table; }
+			.itable { display: inline-table; }
+			.row { display: table-row; }
+			.cell { display: table-cell; }
+			.first-line-uppercase::first-line { text-transform: uppercase; }
+			.first-letter-uppercase::first-letter { text-transform: uppercase; }
+			.first-letter-float::first-letter { float: left; }
 		</style>
 		<div id="container"></div>
 		<svg id="svgContainer"></svg>
 	</div>
-`)
+`,
+)
 
 const container = document.querySelector('#container')
 const svgContainer = document.querySelector('#svgContainer')
 
 globalThis.passed = 0
 globalThis.failed = 0
+globalThis.failures = []
+
+console.time()
 
 setTimeout(() => {
 	console.log(
-		`PASSED ${globalThis.passed}\nFAILED ${globalThis.failed}`
+		`PASSED ${globalThis.passed}\nFAILED ${globalThis.failed}`,
 	)
+	console.log(globalThis.failures)
+	console.timeEnd()
 }, 0)
 
 function testTextInSVG(html, expected, msg) {
@@ -52,10 +47,41 @@ function testTextInSVG(html, expected, msg) {
 function testText(html, expected, msg) {
 	textTextInContainer(html, expected, msg, container)
 }
-function textTextInContainer(html, expected, msg, container) {
+function textTextInContainer(html, expected, msg, cont) {
 	container.innerHTML = html
-	const actual = toInnerText(renderedTextCollectionSteps(container))
+	if (cont != container) {
+		while (container.firstChild) {
+			cont.appendChild(container.firstChild)
+		}
+	}
+	let e = document.getElementById('target')
+	if (!e) {
+		e = cont.firstChild
+	}
+	let pokes = document.getElementsByClassName('poke')
+	for (let i = 0; i < pokes.length; ++i) {
+		pokes[i].textContent = 'abc'
+	}
+	;['rp', 'optgroup', 'div'].forEach(function (tag) {
+		pokes = document.getElementsByClassName('poke-' + tag)
+		for (let i = 0; i < pokes.length; ++i) {
+			const el = document.createElement(tag)
+			el.textContent = 'abc'
+			pokes[i].appendChild(el)
+		}
+	})
+	const shadows = document.getElementsByClassName('shadow')
+	for (let i = 0; i < shadows.length; ++i) {
+		const s = shadows[i].attachShadow({ mode: 'open' })
+		s.textContent = 'abc'
+	}
+	while (e && e.nodeType != Node.ELEMENT_NODE) {
+		e = e.nextSibling
+	}
+
+	const actual = toInnerText(collectRenderedTexts(e))
 	const result = actual === expected
+	const { id } = cont
 	++globalThis[result ? 'passed' : 'failed']
 	if (result) {
 		console.log(`✅ PASSED\n${msg}\n${JSON.stringify(html)} => ${JSON.stringify(actual)}`)
@@ -65,8 +91,9 @@ function textTextInContainer(html, expected, msg, container) {
 				JSON.stringify(actual)
 			}`,
 		)
+		globalThis.failures.push({ msg, err: new Error(msg), html, expected, actual, id })
 	}
-	container.textContent = ''
+	cont.textContent = ''
 }
 
 testText('<div>abc', 'abc', 'Simplest possible test')
@@ -299,9 +326,9 @@ testText(
 	'abc',
 	'display:none container with non-display-none target child',
 )
-testTextInSVG("<div id='target'>abc", "abc", "non-display-none child of svg");
-testTextInSVG("<div style='display:none' id='target'>abc", "abc", "display:none child of svg");
-testTextInSVG("<div style='display:none'><div id='target'>abc", "abc", "child of display:none child of svg");
+testTextInSVG("<div id='target'>abc", 'abc', 'non-display-none child of svg')
+testTextInSVG("<div style='display:none' id='target'>abc", 'abc', 'display:none child of svg')
+testTextInSVG("<div style='display:none'><div id='target'>abc", 'abc', 'child of display:none child of svg')
 
 /**** display:contents ****/
 

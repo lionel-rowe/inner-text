@@ -5,8 +5,6 @@
 // https://infra.spec.whatwg.org/#ascii-whitespace
 // U+0009 TAB, U+000A LF, U+000C FF, U+000D CR, and U+0020 SPACE
 const ASCII_WHITESPACE = '\t\r\f\n '
-const WHITESPACE_AT_START = new RegExp(`^[${ASCII_WHITESPACE}]+`)
-const allWhitespace = () => new RegExp(`[${ASCII_WHITESPACE}]+`, 'g')
 
 // Types and interfaces for the rendered text collection algorithm
 interface RenderedTextCollectionState {
@@ -19,35 +17,11 @@ interface RenderedTextCollectionState {
 }
 
 export type InnerOrOuterTextItem =
-	| { kind: 'text'; content: string, node: Node, startOffset: number, endOffset: number }
-	| { kind: 'requiredLineBreakCount'; count: number, node: Node, offset: number }
+	| { kind: 'text'; content: string; node: Node; startOffset: number; endOffset: number }
+	| { kind: 'requiredLineBreakCount'; count: number; node: Node; offset: number }
 
-// Helper function to check if an element is connected to the document
-function isConnected(node: Node): boolean {
-	return node.isConnected
-}
-
-// Helper function to apply whitespace collapse rules
-function applyWhitespaceCollapse(text: string, whiteSpaceCollapse: string, trimBeginning: boolean): string {
-	if (whiteSpaceCollapse === 'preserve') {
-		return text
-	}
-
-	let result = text
-
-	// Collapse multiple whitespace characters into single spaces
-	result = result.replaceAll(allWhitespace(), ' ')
-
-	// Trim beginning whitespace if needed
-	if (trimBeginning) {
-		result = result.replace(WHITESPACE_AT_START, '')
-	}
-
-	return result
-}
-
-function getLocaleForElement(el: Element) {
-	let e = el as Element | null
+function getLocaleForNode(node: Node) {
+	let e: Element | null = node instanceof Element ? node : node.parentElement
 	while (e) {
 		const lang = e.getAttribute('lang')
 		if (lang != null) return lang
@@ -56,20 +30,105 @@ function getLocaleForElement(el: Element) {
 	return 'und'
 }
 
+type TextTransformResult = {
+	get text(): string
+	spans: {
+		text: string
+		startOffset: number
+		endOffset: number
+	}[]
+}
+
+type TextTransformConfig = {
+	textTransform: string
+	whiteSpaceCollapse: string
+	trimBeginning: boolean
+}
+
+function keyFromSet<T>(s: ReadonlySet<T>, k: unknown): T | null {
+	if (s.has(k as T)) return k as T
+	return null
+}
+
+const letterCases = new Set(['uppercase', 'lowercase', 'capitalize'] as const)
+
 // Helper function to apply text transform
-function applyTextTransform(text: string, textTransform: string, el: Element): string {
-	switch (textTransform) {
-		case 'uppercase':
-			return text.toLocaleUpperCase(getLocaleForElement(el))
-		case 'lowercase':
-			return text.toLocaleLowerCase(getLocaleForElement(el))
-		case 'capitalize':
-			// FIXME: This assumes the element always start at a word boundary. But can fail:
-			// a<span style="text-transform: capitalize">b</span>c
-			return text.replace(/(?<!\p{L})\p{L}/gu, (char) => char.toLocaleUpperCase(getLocaleForElement(el)))
-		case 'none':
-		default:
-			return text
+function transformText(text: string, {
+	textTransform,
+	whiteSpaceCollapse,
+	trimBeginning,
+}: TextTransformConfig, node: Node): TextTransformResult {
+	const letterCase = keyFromSet(letterCases, textTransform)
+	const source = [
+		whiteSpaceCollapse !== 'preserve' && String.raw`(?<ws>[${ASCII_WHITESPACE}]+)`,
+		letterCase && String.raw`(?<letters>\p{L}+)`,
+	].filter(Boolean).join('|')
+
+	if (!source) return { text, spans: [{ text, startOffset: 0, endOffset: text.length }] }
+
+	const regex = new RegExp(source, 'gu')
+
+	const matches = [...text.matchAll(regex)]
+
+	if (!matches.length) return { text, spans: [{ text, startOffset: 0, endOffset: text.length }] }
+
+	const spans: TextTransformResult['spans'] = []
+
+	const first = matches[0]!
+	if (first.index > 0) {
+		spans.push({ text: text.slice(0, first.index), startOffset: 0, endOffset: first.index })
+	}
+
+	for (const [i, m] of matches.entries()) {
+		const { ws, letters } = m.groups as Partial<Record<'ws' | 'letters', string>>
+		let t: string
+		if (ws != null) {
+			t = m.index === 0 && trimBeginning ? '' : ' '
+		} else {
+			const l = letters!
+			switch (letterCase!) {
+				case 'uppercase': {
+					t = l.toLocaleUpperCase(getLocaleForNode(node))
+					break
+				}
+				case 'lowercase': {
+					t = l.toLocaleLowerCase(getLocaleForNode(node))
+					break
+				}
+				case 'capitalize': {
+					t = l.charAt(0).toLocaleUpperCase(getLocaleForNode(node)) + l.slice(1)
+					break
+				}
+			}
+		}
+
+		const startOffset = m.index ?? 0
+		const endOffset = startOffset + m[0].length
+
+		const span = { text: t, startOffset, endOffset }
+
+		if (i === 0) spans.push(span)
+		else {
+			const prev = matches[i - 1]!
+			const s = prev.index + prev[0].length
+			if (s !== startOffset) {
+				spans.push({ text: text.slice(s, startOffset), startOffset: s, endOffset: startOffset })
+			}
+			spans.push(span)
+		}
+	}
+
+	const last = matches.at(-1)!
+	if (last.index + last[0].length < text.length) {
+		const startOffset = last.index + last[0].length
+		spans.push({ text: text.slice(startOffset), startOffset, endOffset: text.length })
+	}
+
+	return {
+		spans,
+		get text() {
+			return spans.map((x) => x.text).join('')
+		},
 	}
 }
 
@@ -78,35 +137,46 @@ function isWhitespace(char: string): boolean {
 	return ASCII_WHITESPACE.includes(char)
 }
 
-export function renderedTextCollectionSteps(
-	node: Node,
-	state?: RenderedTextCollectionState,
-): InnerOrOuterTextItem[] {
-	const s = state ?? {
-		mayStartWithWhitespace: false,
-		truncatedTrailingSpaceFromTextNode: null,
-		withinTable: false,
-		withinTableContent: false,
-		firstTableCell: true,
-		firstTableRow: true,
-	}
+const DEFAULT_START_STATE = {
+	mayStartWithWhitespace: false,
+	truncatedTrailingSpaceFromTextNode: null,
+	withinTable: false,
+	withinTableContent: false,
+	firstTableCell: true,
+	firstTableRow: true,
+} as const satisfies Readonly<RenderedTextCollectionState>
 
+export function collectRenderedTexts(node: Node, state?: Partial<RenderedTextCollectionState>): InnerOrOuterTextItem[] {
+	const items: InnerOrOuterTextItem[] = []
+	renderedTextCollectionSteps(node, { ...DEFAULT_START_STATE, ...state }, items)
+	return items
+}
+
+function renderedTextCollectionSteps(
+	node: Node,
+	state: RenderedTextCollectionState,
+	items: InnerOrOuterTextItem[],
+): void {
 	// Step 1. Let items be the result of running the rendered text collection
 	// steps with each child node of node in tree order,
 	// and then concatenating the results to a single list.
-	const items: InnerOrOuterTextItem[] = []
-	if (!isConnected(node) || !(node instanceof Element || node instanceof Text)) {
-		return items
+
+	if (!node.isConnected || !(node instanceof Element || node instanceof Text)) {
+		return
 	}
 
 	if (node instanceof Text) {
-		const parentElement = node.parentElement
+		const { parentElement } = node
 		if (parentElement) {
-			const {tagName} = parentElement
+			const { tagName } = parentElement
 
 			// Any text contained in these elements must be ignored.
-			if (['CANVAS', 'IMG', 'IFRAME', 'OBJECT', 'INPUT', 'TEXTAREA', 'AUDIO', 'VIDEO'].includes(tagName)) {
-				return items
+			if (
+				['CANVAS', 'IMG', 'IFRAME', 'OBJECT', 'INPUT', 'TEXTAREA', 'AUDIO', 'VIDEO', 'NOSCRIPT'].includes(
+					tagName,
+				)
+			) {
+				return
 			}
 
 			// Select/Option/OptGroup elements are handled a bit differently.
@@ -115,45 +185,45 @@ export function renderedTextCollectionSteps(
 			if (tagName === 'OPTGROUP') {
 				const grandParent = parentElement.parentElement
 				if (!grandParent || grandParent.tagName !== 'SELECT') {
-					return items
+					return
 				}
 			}
 
 			if (tagName === 'SELECT') {
-				return items
+				return
 			}
 
 			// Tables are also a bit special, mainly by only allowing
 			// content within TableCell or TableCaption elements once
 			// we're inside a Table.
-			if (s.withinTable && !s.withinTableContent) {
-				return items
+			if (state.withinTable && !state.withinTableContent) {
+				return
 			}
 
 			const computedStyle = getComputedStyle(parentElement)
 
-			// Step 2: If node's computed value of 'visibility' is not 'visible', then return items.
+			// Step 2: If node's computed value of 'visibility' is not 'visible', then return.
 			//
 			// We need to do this check here on the Text fragment, if we did it on the element and
 			// just skipped rendering all child nodes then there'd be no way to override the
 			// visibility in a child node.
 			if (computedStyle.visibility !== 'visible') {
-				return items
+				return
 			}
 
-			// Step 3: If node is not being rendered, then return items. For the purpose of this step,
+			// Step 3: If node is not being rendered, then return. For the purpose of this step,
 			// the following elements must act as described if the computed value of the 'display'
 			// property is not 'none':
-			const display = computedStyle.display
+			const { display } = computedStyle
 			if (display === 'none') {
 				// Even if set to display: none, Option/OptGroup elements need to
 				// be rendered.
 				if (!['OPTGROUP', 'OPTION'].includes(tagName)) {
-					return items
+					return
 				}
 			}
 
-			const textContent = node.textContent || ''
+			const { textContent } = node
 
 			const whiteSpaceCollapse = computedStyle.whiteSpaceCollapse
 			const preserveWhitespace = whiteSpaceCollapse === 'preserve'
@@ -162,65 +232,82 @@ export function renderedTextCollectionSteps(
 			// Now we need to decide on whether to remove beginning white space or not, this
 			// is mainly decided by the elements we rendered before, but may be overwritten by the white-space
 			// property.
-			const trimBeginningWhiteSpace = !preserveWhitespace && (s.mayStartWithWhitespace || isInline)
-
-			const withWhiteSpaceRulesApplied = applyWhitespaceCollapse(
-				textContent,
-				whiteSpaceCollapse,
-				trimBeginningWhiteSpace,
-			)
+			const trimBeginning = !preserveWhitespace && (state.mayStartWithWhitespace || isInline)
 
 			// Step 4: If node is a Text node, then for each CSS text box produced by node, in
 			// content order, compute the text of the box after application of the CSS
 			// 'white-space' processing rules and 'text-transform' rules, set items to the list
-			// of the resulting strings, and return items. The CSS 'white-space' processing
+			// of the resulting strings, and return. The CSS 'white-space' processing
 			// rules are slightly modified: collapsible spaces at the end of lines are always
 			// collapsed, but they are only removed if the line is the last line of the block,
 			// or it ends with a br element. Soft hyphens should be preserved.
-			const textTransform = computedStyle.textTransform
-			let transformedText = applyTextTransform(withWhiteSpaceRulesApplied, textTransform, parentElement)
+			const { textTransform } = computedStyle
+
+			const config = {
+				trimBeginning,
+				textTransform,
+				textContent,
+				whiteSpaceCollapse,
+			}
+
+			const { text, spans } = transformText(textContent, config, node)
 
 			const isPreformattedElement = preserveWhitespace
 
-			const isFinalCharacterWhitespace = transformedText.length > 0 &&
-				isWhitespace(transformedText[transformedText.length - 1])
+			const isFinalCharacterWhitespace = text.length > 0 &&
+				isWhitespace(text[text.length - 1])
 
-			const isFirstCharacterWhitespace = transformedText.length > 0 &&
-				isWhitespace(transformedText[0])
+			const isFirstCharacterWhitespace = text.length > 0 &&
+				isWhitespace(text[0])
 
 			// By truncating trailing white space and then adding it back in once we
 			// encounter another text node we can ensure no trailing white space for
 			// normal text without having to look ahead
-			if (s.truncatedTrailingSpaceFromTextNode && !isFirstCharacterWhitespace) {
-				const node = s.truncatedTrailingSpaceFromTextNode
+			if (state.truncatedTrailingSpaceFromTextNode && !isFirstCharacterWhitespace) {
+				const node = state.truncatedTrailingSpaceFromTextNode
 				items.push({ kind: 'text', content: ' ', node, startOffset: node.length - 1, endOffset: node.length })
 			}
 
-			if (transformedText.length > 0) {
+			if (text.length > 0) {
 				// Here we decide whether to keep or truncate the final white
 				// space character, if there is one.
 				if (isFinalCharacterWhitespace && !isPreformattedElement) {
-					s.mayStartWithWhitespace = false
-					s.truncatedTrailingSpaceFromTextNode = node
-					transformedText = transformedText.slice(0, -1)
+					state.mayStartWithWhitespace = false
+					state.truncatedTrailingSpaceFromTextNode = node
+					const span = spans.findLast((x) => x.text)!
+					span.text = span.text.slice(0, -1)
 				} else {
-					s.mayStartWithWhitespace = isFinalCharacterWhitespace
-					s.truncatedTrailingSpaceFromTextNode = null
+					state.mayStartWithWhitespace = isFinalCharacterWhitespace
+					state.truncatedTrailingSpaceFromTextNode = null
 				}
-				items.push({ kind: 'text', content: transformedText, node, startOffset: 0x70D0, endOffset: 0x70D0 })
+				for (const { text, startOffset, endOffset } of spans) {
+					if (text === '') continue
+					items.push({ kind: 'text', content: text, node, startOffset, endOffset })
+				}
 			}
 		} else {
 			// If we don't have a parent element then there's no style data available,
 			// in this (pretty unlikely) case we just return the Text fragment as is.
-			items.push({ kind: 'text', content: node.textContent, node, startOffset: 0x70D0, endOffset: 0x70D0 })
+			if (node.textContent === '') return
+			items.push({
+				kind: 'text',
+				content: node.textContent,
+				node,
+				startOffset: 0,
+				endOffset: node.textContent.length,
+			})
 		}
-	} else if (node instanceof Element && node.tagName === 'BR') {
-		// Step 5: If node is a br element, then append a string containing a single U+000A
-		// LF code point to items.
-		s.truncatedTrailingSpaceFromTextNode = null
-		s.mayStartWithWhitespace = true
-		items.push({ kind: 'text', content: '\n', node, startOffset: 0, endOffset: 0 })
 	} else if (node instanceof Element) {
+		if (node.tagName === 'BR') {
+			// Step 5: If node is a br element, then append a string containing a single U+000A
+			// LF code point to items.
+			state.truncatedTrailingSpaceFromTextNode = null
+			state.mayStartWithWhitespace = true
+			items.push({ kind: 'text', content: '\n', node, startOffset: 0, endOffset: 0 })
+
+			return
+		}
+
 		// First we need to gather some infos to setup the various flags
 		// before rendering the child nodes
 		const computedStyle = getComputedStyle(node)
@@ -230,9 +317,9 @@ export function renderedTextCollectionSteps(
 			// skipping all other processing.
 			// We can't just stop here since a child can override a parents visibility.
 			for (const child of node.childNodes) {
-				items.push(...renderedTextCollectionSteps(child, s))
+				renderedTextCollectionSteps(child, state, items)
 			}
-			return items
+			return
 		}
 
 		const { display, position, float } = computedStyle
@@ -246,60 +333,66 @@ export function renderedTextCollectionSteps(
 		// Depending on the display property we have to do various things
 		// before we can render the child nodes.
 		switch (display) {
-			case 'table':
+			case 'table': {
 				surroundingLineBreaks = 1
-				s.withinTable = true
+				state.withinTable = true
 				break
+			}
 			// Step 6: If node's computed value of 'display' is 'table-cell',
 			// and node's CSS box is not the last 'table-cell' box of its
 			// enclosing 'table-row' box, then append a string containing
 			// a single U+0009 TAB code point to items.
-			case 'table-cell':
-				if (!s.firstTableCell) {
+			case 'table-cell': {
+				if (!state.firstTableCell) {
 					items.push({ kind: 'text', content: '\t', node, startOffset: 0, endOffset: 0 })
 					// Make sure we don't add a white-space we removed from the previous node
-					s.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromTextNode = null
 				}
-				s.firstTableCell = false
-				s.withinTableContent = true
+				state.firstTableCell = false
+				state.withinTableContent = true
 				break
+			}
 			// Step 7: If node's computed value of 'display' is 'table-row',
 			// and node's CSS box is not the last 'table-row' box of the nearest
 			// ancestor 'table' box, then append a string containing a single U+000A
 			// LF code point to items.
-			case 'table-row':
-				if (!s.firstTableRow) {
+			case 'table-row': {
+				if (!state.firstTableRow) {
 					items.push({ kind: 'text', content: '\n', node, startOffset: 0, endOffset: 0 })
 					// Make sure we don't add a white-space we removed from the previous node
-					s.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromTextNode = null
 				}
-				s.firstTableRow = false
-				s.firstTableCell = true
+				state.firstTableRow = false
+				state.firstTableCell = true
 				break
+			}
 			// Step 9: If node's used value of 'display' is block-level or 'table-caption',
 			// then append 1 (a required line break count) at the beginning and end of items.
-			case 'block':
+			case 'block': {
 				surroundingLineBreaks = 1
 				break
-			case 'table-caption':
+			}
+			case 'table-caption': {
 				surroundingLineBreaks = 1
-				s.withinTableContent = true
+				state.withinTableContent = true
 				break
+			}
 			case 'inline-flex':
 			case 'inline-grid':
-			case 'inline-block':
+			case 'inline-block': {
 				// InlineBlock's are a bit strange, in that they don't produce a Linebreak, yet
 				// disable white space truncation before and after it, making it one of the few
 				// cases where one can have multiple white space characters following one another.
-				if (s.truncatedTrailingSpaceFromTextNode) {
+				if (state.truncatedTrailingSpaceFromTextNode) {
 					items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
-					s.truncatedTrailingSpaceFromTextNode = null
-					s.mayStartWithWhitespace = true
+					state.truncatedTrailingSpaceFromTextNode = null
+					state.mayStartWithWhitespace = true
 				}
 				break
+			}
 		}
 
-		const {tagName} = node
+		const { tagName } = node
 
 		// Step 8: If node is a p element, then append 2 (a required line break count) at
 		// the beginning and end of items.
@@ -315,8 +408,8 @@ export function renderedTextCollectionSteps(
 
 		if (surroundingLineBreaks > 0) {
 			items.push({ kind: 'requiredLineBreakCount', count: surroundingLineBreaks, node, offset: 0 })
-			s.truncatedTrailingSpaceFromTextNode = null
-			s.mayStartWithWhitespace = true
+			state.truncatedTrailingSpaceFromTextNode = null
+			state.mayStartWithWhitespace = true
 		}
 
 		// Any text/content contained in these elements is ignored.
@@ -324,16 +417,16 @@ export function renderedTextCollectionSteps(
 		// space, since for example <span>asd <input> qwe</span> must
 		// product "asd  qwe" (note the 2 spaces)
 		if (['CANVAS', 'IMG', 'IFRAME', 'OBJECT', 'INPUT', 'TEXTAREA', 'AUDIO', 'VIDEO'].includes(tagName)) {
-			if (display !== 'block' && s.truncatedTrailingSpaceFromTextNode) {
+			if (display !== 'block' && state.truncatedTrailingSpaceFromTextNode) {
 				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
-				s.truncatedTrailingSpaceFromTextNode = null
+				state.truncatedTrailingSpaceFromTextNode = null
 			}
-			s.mayStartWithWhitespace = false
+			state.mayStartWithWhitespace = false
 		} else {
 			// Now we can finally iterate over all children, appending whatever
 			// they produce to items.
 			for (const child of node.childNodes) {
-				items.push(...renderedTextCollectionSteps(child, s))
+				renderedTextCollectionSteps(child, state, items)
 			}
 		}
 
@@ -342,49 +435,26 @@ export function renderedTextCollectionSteps(
 		switch (display) {
 			case 'inline-flex':
 			case 'inline-grid':
-			case 'inline-block':
-				s.truncatedTrailingSpaceFromTextNode = null
-				s.mayStartWithWhitespace = false
+			case 'inline-block': {
+				state.truncatedTrailingSpaceFromTextNode = null
+				state.mayStartWithWhitespace = false
 				break
-			case 'table':
-				s.withinTable = false
+			}
+			case 'table': {
+				state.withinTable = false
 				break
+			}
 			case 'table-cell':
-			case 'table-caption':
-				s.withinTableContent = false
+			case 'table-caption': {
+				state.withinTableContent = false
 				break
+			}
 		}
 
 		if (surroundingLineBreaks > 0) {
 			items.push({ kind: 'requiredLineBreakCount', count: surroundingLineBreaks, node, offset: 0 })
-			s.truncatedTrailingSpaceFromTextNode = null
-			s.mayStartWithWhitespace = true
+			state.truncatedTrailingSpaceFromTextNode = null
+			state.mayStartWithWhitespace = true
 		}
 	}
-
-	return items
-}
-
-export function toInnerText(results: InnerOrOuterTextItem[]): string {
-	const a: InnerOrOuterTextItem[] = []
-
-	for (const x of results) {
-		if (x.kind === 'text') {
-			a.push(x)
-			continue
-		}
-
-		const prevIdx = a.length - 1
-		const prev = a[prevIdx]
-		if (prev?.kind === 'requiredLineBreakCount') {
-			a[prevIdx] = { ...prev, count: Math.max(x.count, prev.count) }
-		} else {
-			a.push(x)
-		}
-	}
-
-	return a.map((x, i, a) => {
-		if (x.kind === 'text') return x.content
-		return i === 0 || i === a.length - 1 ? '' : '\n'.repeat(x.count)
-	}).join('')
 }

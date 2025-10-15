@@ -28,7 +28,9 @@
 				</table>
 				<div data-test-id="split-text">split text data</div>
 				<script id="split-text-script">
-					document.querySelector('[data-test-id="split-text"]').firstChild.splitText(5)
+					document.querySelector('[data-test-id="split-text"]').firstChild.splitText(
+						5,
+					)
 				</script>
 				<div>a&NewLine;b</div>
 				<pre>a&NewLine;b</pre>
@@ -38,8 +40,8 @@
 			</section>
 
 			<script type="module">
-				import { renderedTextCollectionSteps, toInnerText } from './script.mjs'
-				window.renderedTextCollectionSteps = renderedTextCollectionSteps
+				import { collectRenderedTexts, toInnerText } from './script.mjs'
+				window.collectRenderedTexts = collectRenderedTexts
 				window.toInnerText = toInnerText
 			</script>
 			<script type="module" src="./wpt.mjs"></script>

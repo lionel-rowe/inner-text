@@ -1,33 +1,36 @@
 import { assertEquals } from '@std/assert'
 import dedent from 'core-js-pure/full/string/dedent.js'
 import { JsDom } from './testUtils/jsdom.ts'
+import { toInnerText } from './toInnerText.ts'
+import { collectRenderedTexts } from './collectRenderedTexts.ts'
 
 Deno.test('innerText', async (t) => {
-	// const html = await Deno.readTextFile('./src/fixtures/1.html')
-	using _ = new JsDom(`<div id="example"><!-- #1 -->
-  A <span style="display: none;"><!-- #2 -->this text is hidden</span><!-- #3 --> B
-</div>`).patchGlobals()
+	const html = await Deno.readTextFile('./src/fixtures/1.html')
+	using _ = new JsDom(html).patchGlobals()
 	// must import dynamically due to `extends Range` in InnerTextRange
-	const { innerText } = await import('./innerText.ts')
 
-	// const splitText = document.querySelector('[data-test-id="split-text"]')!
-	// assertEquals(splitText.childNodes.length, 1)
-	// globalThis.eval(document.querySelector('script#split-text-script' as 'script')!.textContent)
-	// assertEquals(splitText.childNodes.length, 2)
-
-	const target = document.getElementById('example')!
-	// const textContent = target.textContent
-
-	const nodeDatas: ({
-		text: string
-		offsets: number[]
-	} | string)[] = []
+	const target = document.getElementById('white-space')!
 
 	await t.step('innerText', () => {
-		const result = innerText(target).map((x) => x.innerText).toArray().join('')
+		const result = toInnerText(collectRenderedTexts(target))
 		assertEquals(
 			result,
-			'\n',
+			dedent`
+				White space
+
+				one two three
+				four
+
+				flex item
+				flex item 2
+				table cell 1\ttable cell 2
+				split text data
+				a b
+				a
+				b
+
+				a b c
+			`,
 		)
 	})
 

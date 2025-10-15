@@ -1,2 +1,2 @@
-export * from './innerText.ts'
-export * from './InnerTextRange.ts'
+export * from './toInnerText.ts'
+export * from './collectRenderedTexts.ts'
