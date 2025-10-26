@@ -5,6 +5,10 @@ export function checkVisibility(relativeToRect: DOMRectReadOnly) {
 
 	return (el: Element) => {
 		if (el.checkVisibility?.() === false) return false
+
+		// Always consider BR elements visible, regardless of bounding box
+		if (el.nodeName === 'BR') return true
+
 		const rect = el.getBoundingClientRect()
 		if (rect.width === 0 || rect.height === 0) return false
 		if (isOffscreen(rect, adjust)) return false
