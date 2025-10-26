@@ -4,6 +4,25 @@ import { InnerText, InnerTextRangeError } from './InnerText.ts'
 import { JsDom } from './testUtils/jsdom.ts'
 
 Deno.test(InnerText.name, async (t) => {
+	await t.step('zero-cases', () => {
+		using _ = new JsDom('')
+
+		let innerText = new InnerText(document.createElement('div'))
+		assertEquals(innerText.items, [])
+		assertEquals(innerText.toString(), '')
+
+		innerText = new InnerText(document.createTextNode(''))
+		assertEquals(innerText.items, [])
+		assertEquals(innerText.toString(), '')
+
+		const div = document.createElement('div')
+		div.append('', '', document.createElement('span'))
+		assertEquals(div.childNodes.length, 3)
+		innerText = new InnerText(div)
+		assertEquals(innerText.items, [])
+		assertEquals(innerText.toString(), '')
+	})
+
 	await t.step('joined text', async () => {
 		const html = await Deno.readTextFile('./src/fixtures/white-space.html')
 		using _ = new JsDom(html)
