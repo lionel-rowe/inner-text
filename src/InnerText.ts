@@ -2,22 +2,20 @@ import { collectRenderedTexts, join } from './collectRenderedTexts.ts'
 import { unreachable } from '@std/assert/unreachable'
 import { is } from './is.ts'
 
+/** An item representing a portion of the rendered innerText. */
 export type InnerTextItem =
 	| { kind: 'text'; content: string; node: Text | Element; startOffset: number; endOffset: number }
 	| { kind: 'requiredLineBreakCount'; count: number; node: Element; offset: number }
 
+/** An error indicating an out-of-bounds access within the innerText. */
 export class InnerTextRangeError extends RangeError {}
 
-export type NodeOffsetResult = {
+type NodeOffsetResult = {
 	node: Node
 	offset: number
 }
 
-export type InnerTextResult = {
-	text: string
-	items: readonly InnerTextItem[]
-}
-
+/** Constructor options for {@linkcode InnerText} */
 export type InnerTextOptions = {
 	/**
 	 * The rendering mode to use.
@@ -34,8 +32,17 @@ const DEFAULT_OPTIONS: Readonly<InnerTextOptions> = Object.freeze({
 	mode: 'visual',
 })
 
+/**
+ * A class representing the rendered innerText of a DOM node, along with its individual text items and methods to map
+ * `innerText` indexes to `Range` objects.
+ */
 export class InnerText {
+	/** The individual items that make up the rendered innerText. */
 	readonly items: readonly InnerTextItem[]
+	/**
+	 * The rendered innerText as a string, or `undefined` if `options.mode` is `'standards'` and `target` is
+	 * unsupported.
+	 */
 	readonly value: string | undefined
 
 	readonly #text: string
@@ -71,6 +78,7 @@ export class InnerText {
 		this.value = this.#text
 	}
 
+	/** Returns the rendered innerText as a string. */
 	toString(): string {
 		return this.#text
 	}
