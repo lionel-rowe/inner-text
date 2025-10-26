@@ -71,7 +71,7 @@ export class InnerText {
 		this.value = this.#text
 	}
 
-	toString() {
+	toString(): string {
 		return this.#text
 	}
 

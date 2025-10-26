@@ -3,7 +3,7 @@
 	"name": "@li/inner-text",
 	"version": "0.0.0",
 	"exports": {
-		".": "./mod.ts"
+		".": "./src/mod.ts"
 	},
 	"tasks": {
 		"test": "deno test -RE src",
@@ -29,7 +29,15 @@
 		"proseWrap": "preserve",
 		"exclude": []
 	},
-	"compilerOptions": { "strict": true },
+	"compilerOptions": {
+		"strict": true,
+		"lib": [
+			"dom",
+			"dom.iterable",
+			"esnext",
+			"deno.ns"
+		]
+	},
 	"lint": {
 		"exclude": [],
 		"rules": {
