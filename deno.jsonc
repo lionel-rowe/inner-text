@@ -1,11 +1,17 @@
 {
 	"lock": false,
 	"name": "@li/inner-text",
+	"version": "0.0.0",
 	"exports": {
 		".": "./mod.ts"
 	},
 	"tasks": {
-		"test": "deno test -RE"
+		"test": "deno test -RE src",
+		"build": "deno bundle src/mod.ts -o src/fixtures/script.mjs",
+		"start": {
+			"command": "file-server src/fixtures",
+			"dependencies": ["build"]
+		}
 	},
 	"imports": {
 		"@std/assert": "jsr:@std/assert@^1.0.15",

@@ -2,6 +2,6 @@ export function isTruthy<T>(x: T): x is Exclude<T, false | 0 | 0n | '' | null | 
 	return Boolean(x)
 }
 
-export function debug(fn: () => string): void {
-	console.debug(fn())
+export function clamp(n: number, min: number, max: number): number {
+	return Math.max(min, Math.min(max, n))
 }

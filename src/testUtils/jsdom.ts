@@ -1,115 +1,61 @@
 // @ts-types="@types/jsdom"
 import { JSDOM } from 'jsdom'
 import { stubProperty } from '@std/testing/unstable-stub-property'
+import { unimplemented } from '@std/assert/unimplemented'
 
-function tagNameToDisplay(tagName: string): string | null {
-	if (
-		[
-			'SPAN',
-			'A',
-			'B',
-			'I',
-			'U',
-			'EM',
-			'STRONG',
-			'SMALL',
-			'BIG',
-			'SUB',
-			'SUP',
-			'MARK',
-			'S',
-			'CITE',
-			'Q',
-			'DFN',
-			'VAR',
-			'CODE',
-			'SAMP',
-			'KBD',
-			'TIME',
-		].includes(tagName)
-	) {
-		return 'inline'
-	}
-	if (
-		[
-			'DIV',
-			'SECTION',
-			'ARTICLE',
-			'HEADER',
-			'FOOTER',
-			'NAV',
-			'ASIDE',
-			'MAIN',
-			'P',
-			'H1',
-			'H2',
-			'H3',
-			'H4',
-			'H5',
-			'H6',
-			'UL',
-			'OL',
-			'LI',
-			'DL',
-			'DT',
-			'DD',
-			'FIGURE',
-			'FIGCAPTION',
-			'ADDRESS',
-			'PRE',
-			'TABLE',
-		].includes(tagName)
-	) {
-		return 'block'
-	}
-	if (['TABLE', 'THEAD', 'TBODY', 'TFOOT'].includes(tagName)) {
-		return 'table'
-	}
-	if (['TR'].includes(tagName)) {
-		return 'table-row'
-	}
-	if (['TD', 'TH'].includes(tagName)) {
-		return 'table-cell'
-	}
+// TODO: maybe implement default UA styles more strictly per https://chromium.googlesource.com/chromium/blink/+/master/Source/core/css/html.css
+const selectorToDisplayMappings: Record<string, string> = {
+	none: '[hidden], script, style, noscript, template, title, head',
+	inline:
+		'span, a, b, i, u, em, strong, small, big, sub, sup, mark, s, cite, q, dfn, var, code, samp, kbd, time, br, unrecognized',
+	block:
+		'div, section, article, header, footer, nav, aside, main, p, h1, h2, h3, h4, h5, h6, ul, ol, dl, dt, dd, figure, figcaption, address, pre, body, details',
 
-	if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TITLE', 'HEAD'].includes(tagName)) {
-		return 'none'
-	}
-	return 'inline'
+	table: 'table',
+	'table-header-group': 'thead',
+	'table-row-group': 'tbody',
+	'table-footer-group': 'tfoot',
+	'table-colum': 'col',
+	'table-column-grou': 'colgroup',
+	'table-row': 'tr',
+	'table-cell': 'td, th',
+	'table-caption': 'caption',
+
+	'list-item': 'li, summary',
 }
 
-export class JsDom extends JSDOM {
-	[Symbol.dispose]?: () => void
-	#stack: DisposableStack
-	#globalsPatched = false
+function getDisplay(element: Element): string | null {
+	for (const [display, selector] of Object.entries(selectorToDisplayMappings)) {
+		if (element.matches(selector)) {
+			return display
+		}
+	}
+	unimplemented(`${getDisplay.name}: ${element.tagName}`)
+}
+
+export class JsDom extends JSDOM implements Disposable {
+	readonly #stack = new DisposableStack();
+	[Symbol.dispose]() {
+		this.#stack[Symbol.dispose]()
+	}
 
 	constructor(...params: ConstructorParameters<typeof JSDOM>) {
 		super(...params)
-		this.#stack = new DisposableStack()
 		this.#patchSelf()
+		this.#patchGlobals()
 	}
 
-	patchGlobals() {
-		if (!this.#globalsPatched) {
-			for (const k of Reflect.ownKeys(this.window) as (keyof typeof this.window & keyof typeof globalThis)[]) {
-				try {
-					const v = this.window[k]
-					if (globalThis[k] === v) continue
-					this.#stack.use(stubProperty(globalThis, k, this.window[k]))
-				} catch { /* ignore */ }
-			}
-
-			this.#globalsPatched = true
-
-			this[Symbol.dispose] = () => {
-				this.#stack[Symbol.dispose]()
-				this.#globalsPatched = false
-				this.#stack = new DisposableStack()
-				delete this[Symbol.dispose]
-			}
+	#patchGlobals() {
+		for (const k of Reflect.ownKeys(this.window) as (keyof typeof this.window & keyof typeof globalThis)[]) {
+			try {
+				const v = this.window[k]
+				if (globalThis[k] === v) continue
+				this.#stack.use(stubProperty(globalThis, k, this.window[k]))
+			} catch { /* ignore */ }
 		}
 
-		return this as this & Disposable
+		const evalMe = document.getElementById('eval-me')
+		if (evalMe != null) globalThis.eval(evalMe.textContent)
 	}
 
 	#patchSelf() {
@@ -121,16 +67,12 @@ export class JsDom extends JSDOM {
 			if (!(el instanceof HTMLElement)) return computed
 
 			Object.assign(computed, {
-				display: tagNameToDisplay(el.tagName) ?? 'inline',
+				display: getDisplay(el) ?? 'inline',
 				visibility: computed.visibility || 'visible',
 				float: 'none',
 			})
 
-			// const whiteSpace = el.style.whiteSpace
-			const whiteSpaceCollapse = /* whiteSpace
-				? (whiteSpace.includes('pre') ? 'preserve' : 'collapse')
-				:  */
-				el.closest('pre') != null ? 'preserve' : 'collapse'
+			const whiteSpaceCollapse = el.closest('pre') != null ? 'preserve' : 'collapse'
 
 			Object.assign(computed, { whiteSpaceCollapse })
 
@@ -140,11 +82,15 @@ export class JsDom extends JSDOM {
 		const getElementRect: Element['getBoundingClientRect'] = () => new DOMRect(5, 5, 10, 10)
 		const getPageRect: Element['getBoundingClientRect'] = () => new DOMRect(0, 0, 20, 20)
 
-		Element.prototype.getBoundingClientRect = getElementRect
-
-		HTMLElement.prototype.checkVisibility = function () {
-			return this.style.display !== 'none'
+		function checkVisibility(this: Element): boolean {
+			if (this instanceof HTMLElement) return !this.hidden && this.style.display !== 'none'
+			return true
 		}
+
+		Object.defineProperties(Element.prototype, {
+			checkVisibility: { value: checkVisibility },
+			getBoundingClientRect: { value: getElementRect },
+		})
 
 		Object.defineProperties(HTMLHtmlElement.prototype, {
 			getBoundingClientRect: { value: getPageRect },

@@ -4,6 +4,12 @@
 // https://github.com/web-platform-tests/wpt/blob/08c1ff3cb33d/html/dom/elements/the-innertext-and-outertext-properties/getter-tests.js
 // 3-Clause BSD License https://opensource.org/license/bsd-3-clause
 
+import { InnerText } from './script.mjs'
+
+// for debugging
+globalThis.InnerText = InnerText
+globalThis.testText = testText
+
 document.body.insertAdjacentHTML(
 	'beforeend',
 	`
@@ -34,15 +40,14 @@ globalThis.failures = []
 console.time()
 
 setTimeout(() => {
-	console.log(
-		`PASSED ${globalThis.passed}\nFAILED ${globalThis.failed}`,
-	)
-	console.log(globalThis.failures)
+	const total = globalThis.passed + globalThis.failed
+	console.info(`PASSED ${globalThis.passed}\nFAILED ${globalThis.failed}\nTOTAL ${total}`)
+	console.info(globalThis.failures)
 	console.timeEnd()
 }, 0)
 
 function testTextInSVG(html, expected, msg) {
-	textTextInContainer(html, expected, msg, svgContainer)
+	textTextInContainer(html, expected, `[In SVG] ${msg}`, svgContainer)
 }
 function testText(html, expected, msg) {
 	textTextInContainer(html, expected, msg, container)
@@ -79,12 +84,13 @@ function textTextInContainer(html, expected, msg, cont) {
 		e = e.nextSibling
 	}
 
-	const actual = toInnerText(collectRenderedTexts(e))
+	// expected = e.innerText
+	const actual = new InnerText(e, { mode: 'standards' }).value
 	const result = actual === expected
 	const { id } = cont
 	++globalThis[result ? 'passed' : 'failed']
 	if (result) {
-		console.log(`✅ PASSED\n${msg}\n${JSON.stringify(html)} => ${JSON.stringify(actual)}`)
+		console.info(`✅ PASSED\n${msg}\n${JSON.stringify(html)} => ${JSON.stringify(actual)}`)
 	} else {
 		console.error(
 			`💥 FAILED\n${msg}\nExpected ${JSON.stringify(html)} => ${JSON.stringify(expected)}, actual: ${

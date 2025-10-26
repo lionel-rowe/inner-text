@@ -1,37 +1,57 @@
 // Spec: https://html.spec.whatwg.org/multipage/#rendered-text-collection-steps
-// Ported and modified from Rust implementation at https://github.com/servo/servo/blob/15116d2caec1/components/layout/query.rs
+// Ported and modified from Rust implementation at https://github.com/servo/servo/blob/15116d2caec1/components/layout/query.rs#L877
 // (Mozilla Public License https://mozilla.org/MPL/2.0/)
+
+import { checkVisibility } from './checkVisibility.ts'
+import { condenseInnerTextItems } from './condenseInnerTextItems.ts'
+import { InnerTextItem, InnerTextOptions } from './InnerText.ts'
+import { is } from './is.ts'
 
 // https://infra.spec.whatwg.org/#ascii-whitespace
 // U+0009 TAB, U+000A LF, U+000C FF, U+000D CR, and U+0020 SPACE
 const ASCII_WHITESPACE = '\t\r\f\n '
 
 // Types and interfaces for the rendered text collection algorithm
-interface RenderedTextCollectionState {
+type RenderedTextCollectionState = {
 	mayStartWithWhitespace: boolean
 	truncatedTrailingSpaceFromTextNode: Text | null
 	withinTable: boolean
 	withinTableContent: boolean
 	firstTableCell: boolean
 	firstTableRow: boolean
+	withinSvg: boolean
+	withinSvgText: boolean
 }
 
-export type InnerOrOuterTextItem =
-	| { kind: 'text'; content: string; node: Node; startOffset: number; endOffset: number }
-	| { kind: 'requiredLineBreakCount'; count: number; node: Node; offset: number }
+const DEFAULT_START_STATE: Readonly<RenderedTextCollectionState> = Object.freeze({
+	mayStartWithWhitespace: false,
+	truncatedTrailingSpaceFromTextNode: null,
+	withinTable: false,
+	withinTableContent: false,
+	firstTableCell: true,
+	firstTableRow: true,
+	withinSvg: false,
+	withinSvgText: false,
+})
 
 function getLocaleForNode(node: Node) {
-	let e: Element | null = node instanceof Element ? node : node.parentElement
-	while (e) {
-		const lang = e.getAttribute('lang')
-		if (lang != null) return lang
-		e = e.parentElement
+	let element: Element | null = is.element(node) ? node : node.parentElement
+	while (element) {
+		const lang = element.getAttribute('lang')
+		if (lang != null) {
+			try {
+				return new Intl.Locale(lang).toString()
+			} catch {
+				return 'und'
+			}
+		}
+		element = element.parentElement
 	}
 	return 'und'
 }
 
 type TextTransformResult = {
-	get text(): string
+	text: string
 	spans: {
 		text: string
 		startOffset: number
@@ -126,9 +146,7 @@ function transformText(text: string, {
 
 	return {
 		spans,
-		get text() {
-			return spans.map((x) => x.text).join('')
-		},
+		text: spans.map((x) => x.text).join(''),
 	}
 }
 
@@ -137,45 +155,57 @@ function isWhitespace(char: string): boolean {
 	return ASCII_WHITESPACE.includes(char)
 }
 
-const DEFAULT_START_STATE = {
-	mayStartWithWhitespace: false,
-	truncatedTrailingSpaceFromTextNode: null,
-	withinTable: false,
-	withinTableContent: false,
-	firstTableCell: true,
-	firstTableRow: true,
-} as const satisfies Readonly<RenderedTextCollectionState>
-
-export function collectRenderedTexts(node: Node, state?: Partial<RenderedTextCollectionState>): InnerOrOuterTextItem[] {
-	const items: InnerOrOuterTextItem[] = []
-	renderedTextCollectionSteps(node, { ...DEFAULT_START_STATE, ...state }, items)
-	return items
+export function collectRenderedTexts(node: Node, options: InnerTextOptions): InnerTextItem[] {
+	const items: InnerTextItem[] = []
+	renderedTextCollectionSteps(node, {
+		state: { ...DEFAULT_START_STATE },
+		items,
+		options,
+		checkVisibility: checkVisibility(
+			(node.ownerDocument ?? globalThis.document).documentElement.getBoundingClientRect(),
+		),
+	})
+	return condenseInnerTextItems(items)
 }
 
-function renderedTextCollectionSteps(
-	node: Node,
-	state: RenderedTextCollectionState,
-	items: InnerOrOuterTextItem[],
-): void {
+export function join(items: readonly InnerTextItem[]) {
+	return items.map((x, i, a) => {
+		if (x.kind === 'text') return x.content
+		return i === 0 || i === a.length - 1 ? '' : '\n'.repeat(x.count)
+	}).join('')
+}
+
+function renderedTextCollectionSteps(node: Node, params: {
+	state: RenderedTextCollectionState
+	items: InnerTextItem[]
+	options: InnerTextOptions
+	checkVisibility: (el: Element) => boolean
+}): void {
+	const { state, items, options, checkVisibility } = params
+
 	// Step 1. Let items be the result of running the rendered text collection
 	// steps with each child node of node in tree order,
 	// and then concatenating the results to a single list.
 
-	if (!node.isConnected || !(node instanceof Element || node instanceof Text)) {
-		return
+	const visited = new WeakSet<Element>()
+	const checkVisited = (node: Element) => {
+		if (visited.has(node)) return true
+		visited.add(node)
+		return false
 	}
 
-	if (node instanceof Text) {
+	if (!node.isConnected) return
+
+	if (is.text(node)) {
 		const { parentElement } = node
-		if (parentElement) {
+
+		if (parentElement != null) {
 			const { tagName } = parentElement
 
+			if (state.withinSvg && !state.withinSvgText) return
+
 			// Any text contained in these elements must be ignored.
-			if (
-				['CANVAS', 'IMG', 'IFRAME', 'OBJECT', 'INPUT', 'TEXTAREA', 'AUDIO', 'VIDEO', 'NOSCRIPT'].includes(
-					tagName,
-				)
-			) {
+			if (is.ignorableTagName(tagName)) {
 				return
 			}
 
@@ -189,9 +219,7 @@ function renderedTextCollectionSteps(
 				}
 			}
 
-			if (tagName === 'SELECT') {
-				return
-			}
+			if (tagName === 'SELECT') return
 
 			// Tables are also a bit special, mainly by only allowing
 			// content within TableCell or TableCaption elements once
@@ -218,16 +246,14 @@ function renderedTextCollectionSteps(
 			if (display === 'none') {
 				// Even if set to display: none, Option/OptGroup elements need to
 				// be rendered.
-				if (!['OPTGROUP', 'OPTION'].includes(tagName)) {
-					return
-				}
+				if (!is.optionTagName(tagName)) return
 			}
 
 			const { textContent } = node
 
 			const whiteSpaceCollapse = computedStyle.whiteSpaceCollapse
 			const preserveWhitespace = whiteSpaceCollapse === 'preserve'
-			const isInline = ['inline-block', 'inline-flex', 'inline-grid'].includes(display)
+			const isInline = is.inlineBlockLikeStyle(display)
 
 			// Now we need to decide on whether to remove beginning white space or not, this
 			// is mainly decided by the elements we rendered before, but may be overwritten by the white-space
@@ -297,7 +323,31 @@ function renderedTextCollectionSteps(
 				endOffset: node.textContent.length,
 			})
 		}
-	} else if (node instanceof Element) {
+	} else if (is.element(node)) {
+		if (node.tagName === 'NOSCRIPT') return
+		if (options.mode === 'visual' && !checkVisibility(node)) return
+
+		if (state.withinSvg) {
+			if (node.tagName === 'defs') return
+
+			if (node.tagName === 'text') {
+				state.withinSvgText = true
+				for (const child of node.childNodes) {
+					renderedTextCollectionSteps(child, params)
+				}
+				state.withinSvgText = false
+				return
+			}
+		}
+		if (node.tagName === 'svg') {
+			state.withinSvg = true
+			for (const child of node.childNodes) {
+				renderedTextCollectionSteps(child, params)
+			}
+			state.withinSvg = false
+			return
+		}
+
 		if (node.tagName === 'BR') {
 			// Step 5: If node is a br element, then append a string containing a single U+000A
 			// LF code point to items.
@@ -317,8 +367,9 @@ function renderedTextCollectionSteps(
 			// skipping all other processing.
 			// We can't just stop here since a child can override a parents visibility.
 			for (const child of node.childNodes) {
-				renderedTextCollectionSteps(child, state, items)
+				renderedTextCollectionSteps(child, params)
 			}
+
 			return
 		}
 
@@ -368,7 +419,10 @@ function renderedTextCollectionSteps(
 			}
 			// Step 9: If node's used value of 'display' is block-level or 'table-caption',
 			// then append 1 (a required line break count) at the beginning and end of items.
-			case 'block': {
+			case 'block':
+			case 'list-item':
+			case 'flex':
+			case 'grid': {
 				surroundingLineBreaks = 1
 				break
 			}
@@ -402,12 +456,16 @@ function renderedTextCollectionSteps(
 
 		// Option/OptGroup elements should go on separate lines, by treating them like
 		// Block elements we can achieve that.
-		if (['OPTION', 'OPTGROUP'].includes(tagName)) {
-			surroundingLineBreaks = 1
-		}
+		if (is.optionTagName(tagName)) surroundingLineBreaks = 1
 
 		if (surroundingLineBreaks > 0) {
-			items.push({ kind: 'requiredLineBreakCount', count: surroundingLineBreaks, node, offset: 0 })
+			const isEnd = checkVisited(node)
+			items.push({
+				kind: 'requiredLineBreakCount',
+				count: surroundingLineBreaks,
+				node,
+				offset: isEnd ? node.childNodes.length : 0,
+			})
 			state.truncatedTrailingSpaceFromTextNode = null
 			state.mayStartWithWhitespace = true
 		}
@@ -415,18 +473,24 @@ function renderedTextCollectionSteps(
 		// Any text/content contained in these elements is ignored.
 		// However we still need to check whether we have to prepend a
 		// space, since for example <span>asd <input> qwe</span> must
-		// product "asd  qwe" (note the 2 spaces)
-		if (['CANVAS', 'IMG', 'IFRAME', 'OBJECT', 'INPUT', 'TEXTAREA', 'AUDIO', 'VIDEO'].includes(tagName)) {
+		// produce "asd  qwe" (note the 2 spaces)
+		if (is.ignorableTagName(tagName)) {
 			if (display !== 'block' && state.truncatedTrailingSpaceFromTextNode) {
 				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
 				state.truncatedTrailingSpaceFromTextNode = null
 			}
 			state.mayStartWithWhitespace = false
+		} else if (tagName === 'DETAILS' && !(node as HTMLDetailsElement).open) {
+			const [child] = node.children
+			if (child != null && child.tagName === 'SUMMARY') {
+				// If we're inside a closed <details> element we only render the <summary>
+				renderedTextCollectionSteps(child, params)
+			}
 		} else {
 			// Now we can finally iterate over all children, appending whatever
 			// they produce to items.
 			for (const child of node.childNodes) {
-				renderedTextCollectionSteps(child, state, items)
+				renderedTextCollectionSteps(child, params)
 			}
 		}
 
@@ -452,9 +516,16 @@ function renderedTextCollectionSteps(
 		}
 
 		if (surroundingLineBreaks > 0) {
-			items.push({ kind: 'requiredLineBreakCount', count: surroundingLineBreaks, node, offset: 0 })
+			const isEnd = checkVisited(node)
+			items.push({
+				kind: 'requiredLineBreakCount',
+				count: surroundingLineBreaks,
+				node,
+				offset: isEnd ? node.childNodes.length : 0,
+			})
 			state.truncatedTrailingSpaceFromTextNode = null
 			state.mayStartWithWhitespace = true
 		}
 	}
+	// else (non-text, non-element) no-op
 }
