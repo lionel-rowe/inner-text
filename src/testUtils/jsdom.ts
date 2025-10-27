@@ -2,6 +2,8 @@
 import { JSDOM } from 'jsdom'
 import { stubProperty } from '@std/testing/unstable-stub-property'
 import { unimplemented } from '@std/assert/unimplemented'
+import { isDomException } from '@li/is-dom-exception'
+import { is } from '../is.ts'
 
 // TODO: maybe implement default UA styles more strictly per https://chromium.googlesource.com/chromium/blink/+/master/Source/core/css/html.css
 const selectorToDisplayMappings: Record<string, string> = {
@@ -60,7 +62,43 @@ export class JsDom extends JSDOM implements Disposable {
 
 	#patchSelf() {
 		const { window } = this
-		const { getComputedStyle, Element, HTMLElement, HTMLHtmlElement, DOMRect } = window
+		const { getComputedStyle, Element, HTMLElement, HTMLHtmlElement, DOMRect, Error, Range: _Range, document } =
+			window
+		const errorIsError = globalThis.Error.isError
+
+		// https://github.com/jsdom/jsdom/issues/3973
+		Error.isError = (e): e is Error => {
+			return errorIsError(e) || e instanceof Error
+		}
+
+		// better error message for debugging
+		class Range extends _Range {
+			override setStart(node: Node, offset: number) {
+				return this.#set('Start', node, offset)
+			}
+			override setEnd(node: Node, offset: number) {
+				return this.#set('End', node, offset)
+			}
+
+			#set(position: 'Start' | 'End', node: Node, offset: number) {
+				try {
+					super[`set${position}`](node, offset)
+				} catch (e) {
+					if (isDomException(e, 'IndexSizeError')) {
+						const serializedNode = is.text(node)
+							? JSON.stringify(node.data.length > 15 ? `${node.data.slice(0, 12)}...` : node.data)
+							: `<${node.nodeName}>`
+
+						throw new DOMException(`${e.message} set${position}(${serializedNode}, ${offset})`, e.name)
+					}
+
+					throw e
+				}
+			}
+		}
+
+		window.Range = Range
+		document.createRange = () => new Range()
 
 		window.getComputedStyle = (el) => {
 			const computed = getComputedStyle(el)

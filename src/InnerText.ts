@@ -10,10 +10,7 @@ export type InnerTextItem =
 /** An error indicating an out-of-bounds access within the innerText. */
 export class InnerTextRangeError extends RangeError {}
 
-type NodeOffsetResult = {
-	node: Node
-	offset: number
-}
+type NodeOffsetResult = [node: Node, offset: number]
 
 /** Constructor options for {@linkcode InnerText} */
 export type InnerTextOptions = {
@@ -46,11 +43,13 @@ export class InnerText {
 	readonly value: string | undefined
 
 	readonly #text: string
+	readonly #document: Document
 	#cursor = 0
 	#consumed = 0
 
 	constructor(target: Node, options?: InnerTextOptions) {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
+		this.#document = target.ownerDocument ?? globalThis.document
 
 		if (opts.mode === 'standards' && is.element(target)) {
 			if (is.unsupportedTagName(target.tagName)) {
@@ -98,7 +97,7 @@ export class InnerText {
 			throw new InnerTextRangeError(`startIndex ${startIndex} is greater than endIndex ${endIndex}`)
 		}
 
-		const range = new Range()
+		const range = this.#document.createRange()
 
 		let result = this.#seek(startIndex)
 		let start: NodeOffsetResult
@@ -126,17 +125,15 @@ export class InnerText {
 			}
 		}
 
-		if (startIndex === endIndex) {
-			range.setStart(start.node, start.offset)
-			range.setEnd(start.node, start.offset)
-			return range
+		// automatically sets end too if range is collapsed
+		range.setStart(...start)
+
+		if (startIndex !== endIndex) {
+			const end = this.#seek(endIndex)
+			if (typeof end === 'boolean') throw new InnerTextRangeError(`${endIndex} is out of bounds`)
+			range.setEnd(...end)
 		}
 
-		const end = this.#seek(endIndex)
-		if (typeof end === 'boolean') throw new InnerTextRangeError(`${endIndex} is out of bounds`)
-
-		range.setStart(start.node, start.offset)
-		range.setEnd(end.node, end.offset)
 		return range
 	}
 
@@ -150,83 +147,51 @@ export class InnerText {
 	 * Seeks to the given offset within the innerText and returns the corresponding node and offset within that node.
 	 *
 	 * @param innerTextOffset The text offset within the innerText, in UTF-16 code units.
-	 * @param fromZero Whether to reset the internal cursor to the start.
+	 * @param restart Whether to reset the internal cursor to the start.
 	 * @returns
 	 * - If found, the node and offset within that node that corresponds to the given innerText offset.
-	 * - Otherwise, a boolean indicating whether the search can be retried.
+	 * - Otherwise, a boolean indicating whether the search can be retried with `restart=true`.
 	 * @throws {InnerTextRangeError} if out-of-bounds
 	 */
-	#seek(innerTextOffset: number, fromZero?: boolean): NodeOffsetResult | boolean {
-		if (fromZero) {
+	#seek(innerTextOffset: number, restart?: boolean): NodeOffsetResult | boolean {
+		const { items } = this
+
+		if (items.length === 0) return false
+
+		if (innerTextOffset === this.#text.length) {
+			const item = items.findLast((item, i) => {
+				const spanLength = this.#innerTextLength(item, i, items)
+				return spanLength > 0
+			})
+
+			return item == null ? false : item.kind === 'text' ? [item.node, item.endOffset] : [item.node, item.offset]
+		}
+
+		if (restart) {
 			this.#cursor = 0
 			this.#consumed = 0
 		}
 
-		const items = this.items
-		const text = this.#text
-		const totalLength = text.length
+		if (innerTextOffset < this.#consumed) return !restart
 
-		if (items.length === 0) return false
-
-		const isRetriable = !fromZero
-
-		while (this.#cursor < items.length) {
+		for (; this.#cursor < items.length; ++this.#cursor) {
 			const item = items[this.#cursor]!
-			const spanLength = this.#lengthForItem(item, this.#cursor, items)
+			const spanLength = this.#innerTextLength(item, this.#cursor, items)
 			if (spanLength === 0) continue
 			if (innerTextOffset < this.#consumed + spanLength) {
 				const relative = innerTextOffset - this.#consumed
-				return this.#resolveWithin(item, relative)
+				return item.kind === 'text' ? [item.node, relative + item.startOffset] : [item.node, item.offset]
 			}
-			++this.#cursor
+
 			this.#consumed += spanLength
 		}
 
-		if (innerTextOffset === totalLength) {
-			for (let i = items.length - 1; i >= 0; --i) {
-				const item = items[i]!
-				const spanLength = this.#lengthForItem(item, i, items)
-				if (spanLength === 0) continue
-				return this.#resolveAtEnd(item)
-			}
-		}
-
-		return isRetriable
+		return false
 	}
 
-	#lengthForItem(item: InnerTextItem, index: number, items: readonly InnerTextItem[]): number {
+	#innerTextLength(item: InnerTextItem, index: number, items: readonly InnerTextItem[]): number {
 		if (item.kind === 'text') return item.content.length
 		if (index === 0 || index === items.length - 1) return 0
 		return item.count
-	}
-
-	#resolveWithin(item: InnerTextItem, relative: number): NodeOffsetResult {
-		if (item.kind === 'requiredLineBreakCount') {
-			return { node: item.node, offset: item.offset }
-		}
-		return { node: item.node, offset: this.#offsetWithinTextItem(item, relative) }
-	}
-
-	#resolveAtEnd(item: InnerTextItem): NodeOffsetResult {
-		if (item.kind === 'requiredLineBreakCount') {
-			return { node: item.node, offset: item.offset }
-		}
-		return { node: item.node, offset: this.#offsetWithinTextItem(item, item.content.length) }
-	}
-
-	#offsetWithinTextItem(item: Extract<InnerTextItem, { kind: 'text' }>, relative: number): number {
-		const { startOffset, endOffset, content, node } = item
-		const length = content.length
-		if (length === 0) return startOffset
-		if (relative <= 0) return startOffset
-		if (relative >= length) return endOffset
-
-		const originalLength = endOffset - startOffset
-		if (!is.text(node) || originalLength === 0) return startOffset
-		if (originalLength === length) return startOffset + relative
-
-		const ratio = relative / length
-		const projected = startOffset + ratio * originalLength
-		return Math.min(endOffset, Math.max(startOffset, Math.round(projected)))
 	}
 }

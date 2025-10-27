@@ -122,7 +122,7 @@ function transformText(text: string, {
 			}
 		}
 
-		const startOffset = m.index ?? 0
+		const startOffset = m.index
 		const endOffset = startOffset + m[0].length
 
 		const span = { text: t, startOffset, endOffset }
@@ -291,7 +291,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 			// normal text without having to look ahead
 			if (state.truncatedTrailingSpaceFromTextNode && !isFirstCharacterWhitespace) {
 				const node = state.truncatedTrailingSpaceFromTextNode
-				items.push({ kind: 'text', content: ' ', node, startOffset: node.length - 1, endOffset: node.length })
+				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: node.length })
 			}
 
 			if (text.length > 0) {
