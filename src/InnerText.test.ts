@@ -218,8 +218,7 @@ Deno.test('readme', () => {
 		items,
 		[
 			{ kind: 'text', content: 'A', node: '#text', startOffset: 2, endOffset: 3 },
-			{ kind: 'text', content: ' ', node: '#text', startOffset: 0, endOffset: 1 },
-			{ kind: 'text', content: 'B', node: '#text', startOffset: 1, endOffset: 2 },
+			{ kind: 'text', content: ' B', node: '#text', startOffset: 0, endOffset: 2 },
 			{ kind: 'text', content: '\n', node: 'BR', startOffset: 0, endOffset: 0 },
 			{ kind: 'text', content: 'C', node: '#text', startOffset: 2, endOffset: 3 },
 			{ kind: 'requiredLineBreakCount', count: 2, node: 'P', offset: 0 },

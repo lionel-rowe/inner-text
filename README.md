@@ -25,12 +25,11 @@ const innerText = new InnerText($el)
 innerText.items
 // [
 //   { kind: "text", content: "A", node: #text, startOffset: 2, endOffset: 3 },
-//   { kind: "text", content: " ", node: #text, startOffset: 0, endOffset: 1 },
-//   { kind: "text", content: "B", node: #text, startOffset: 1, endOffset: 2 },
+//   { kind: "text", content: " B", node: #text, startOffset: 0, endOffset: 2 },
 //   { kind: "text", content: "\n", node: <br>, startOffset: 0, endOffset: 0 },
 //   { kind: "text", content: "C", node: #text, startOffset: 2, endOffset: 3 },
 //   { kind: "requiredLineBreakCount", count: 2, node: <p>, offset: 0 },
-//   { kind: "text", content: "D", node: #text, startOffset: 0, endOffset: 1 }
+//   { kind: "text", content: "D", node: #text, startOffset: 0, endOffset: 1 },
 // ]
 
 innerText.toString()
@@ -39,7 +38,7 @@ innerText.toString()
 const match = /A\s+B\s+C/.exec(innerText.toString())!
 const range = innerText.range(match.index, match.index + match[0].length)
 range.toString()
-// 'A [hidden text] B\n\t\n\tC\n\t'
+// "A [hidden text] B\n\t\n\tC\n\t"
 ```
 
 ## Limitations

@@ -6,7 +6,7 @@ export function condenseInnerTextItems(results: InnerTextItem[]): InnerTextItem[
 	if (results.length === 1 && results[0].node.nodeName === 'BR') return []
 
 	const filtered = results.filter((x, i) => {
-		if (x.kind === 'text') return true
+		if (x.kind === 'text') return x.content.length > 0
 
 		if (i === 0 || i === results.length - 1) {
 			return false

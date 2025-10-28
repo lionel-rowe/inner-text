@@ -32,4 +32,4 @@ class InnerTextRegistry {
 }
 
 /** The global {@linkcode InnerTextRegistry} instance. */
-export const innerTextRegistry = new InnerTextRegistry()
+export const innerTextRegistry: InnerTextRegistry = new InnerTextRegistry()

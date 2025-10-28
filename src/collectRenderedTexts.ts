@@ -14,7 +14,7 @@ const ASCII_WHITESPACE = '\t\r\f\n '
 // Types and interfaces for the rendered text collection algorithm
 type RenderedTextCollectionState = {
 	mayStartWithWhitespace: boolean
-	truncatedTrailingSpaceFromTextNode: Text | null
+	truncatedTrailingSpaceFromItem: (Extract<InnerTextItem, { kind: 'text' }> & { node: Text }) | null
 	withinTable: boolean
 	withinTableContent: boolean
 	firstTableCell: boolean
@@ -25,7 +25,7 @@ type RenderedTextCollectionState = {
 
 const DEFAULT_START_STATE: Readonly<RenderedTextCollectionState> = Object.freeze({
 	mayStartWithWhitespace: false,
-	truncatedTrailingSpaceFromTextNode: null,
+	truncatedTrailingSpaceFromItem: null,
 	withinTable: false,
 	withinTableContent: false,
 	firstTableCell: true,
@@ -50,13 +50,15 @@ function getLocaleForNode(node: Node) {
 	return 'und'
 }
 
+type TextTransformSpan = {
+	text: string
+	startOffset: number
+	endOffset: number
+}
+
 type TextTransformResult = {
 	text: string
-	spans: {
-		text: string
-		startOffset: number
-		endOffset: number
-	}[]
+	spans: TextTransformSpan[]
 }
 
 type TextTransformConfig = {
@@ -92,11 +94,26 @@ function transformText(text: string, {
 
 	if (!matches.length) return { text, spans: [{ text, startOffset: 0, endOffset: text.length }] }
 
-	const spans: TextTransformResult['spans'] = []
+	const spans: TextTransformSpan[] = []
+
+	let canCombinePrev = false
+
+	function pushSpan(span: TextTransformSpan) {
+		const canCombineCurrent = span.endOffset - span.startOffset === span.text.length
+
+		if (!canCombinePrev || !canCombineCurrent) {
+			spans.push(span)
+		} else {
+			spans[spans.length - 1]!.text += span.text
+			spans[spans.length - 1]!.endOffset = span.endOffset
+		}
+
+		canCombinePrev = canCombineCurrent
+	}
 
 	const first = matches[0]!
 	if (first.index > 0) {
-		spans.push({ text: text.slice(0, first.index), startOffset: 0, endOffset: first.index })
+		pushSpan({ text: text.slice(0, first.index), startOffset: 0, endOffset: first.index })
 	}
 
 	for (const [i, m] of matches.entries()) {
@@ -127,21 +144,21 @@ function transformText(text: string, {
 
 		const span = { text: t, startOffset, endOffset }
 
-		if (i === 0) spans.push(span)
+		if (i === 0) pushSpan(span)
 		else {
 			const prev = matches[i - 1]!
 			const s = prev.index + prev[0].length
 			if (s !== startOffset) {
-				spans.push({ text: text.slice(s, startOffset), startOffset: s, endOffset: startOffset })
+				pushSpan({ text: text.slice(s, startOffset), startOffset: s, endOffset: startOffset })
 			}
-			spans.push(span)
+			pushSpan(span)
 		}
 	}
 
 	const last = matches.at(-1)!
 	if (last.index + last[0].length < text.length) {
 		const startOffset = last.index + last[0].length
-		spans.push({ text: text.slice(startOffset), startOffset, endOffset: text.length })
+		pushSpan({ text: text.slice(startOffset), startOffset, endOffset: text.length })
 	}
 
 	return {
@@ -289,26 +306,46 @@ function renderedTextCollectionSteps(node: Node, params: {
 			// By truncating trailing white space and then adding it back in once we
 			// encounter another text node we can ensure no trailing white space for
 			// normal text without having to look ahead
-			if (state.truncatedTrailingSpaceFromTextNode && !isFirstCharacterWhitespace) {
-				const node = state.truncatedTrailingSpaceFromTextNode
-				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: node.length })
+			if (state.truncatedTrailingSpaceFromItem != null && !isFirstCharacterWhitespace) {
+				const item = state.truncatedTrailingSpaceFromItem
+
+				if (item.endOffset < item.node.data.length) {
+					item.content += ' '
+					item.endOffset = item.node.data.length
+				}
 			}
 
 			if (text.length > 0) {
 				// Here we decide whether to keep or truncate the final white
 				// space character, if there is one.
+				let truncatedTrailingWhiteSpaceIndex = -1
+
 				if (isFinalCharacterWhitespace && !isPreformattedElement) {
+					truncatedTrailingWhiteSpaceIndex = spans.findLastIndex((x) => x.text)
 					state.mayStartWithWhitespace = false
-					state.truncatedTrailingSpaceFromTextNode = node
-					const span = spans.findLast((x) => x.text)!
-					span.text = span.text.slice(0, -1)
 				} else {
 					state.mayStartWithWhitespace = isFinalCharacterWhitespace
-					state.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromItem = null
 				}
-				for (const { text, startOffset, endOffset } of spans) {
+				for (let i = 0; i < spans.length; ++i) {
+					const { text, startOffset, endOffset } = spans[i]!
 					if (text === '') continue
-					items.push({ kind: 'text', content: text, node, startOffset, endOffset })
+
+					if (i === truncatedTrailingWhiteSpaceIndex) {
+						const item = {
+							kind: 'text',
+							content: text.slice(0, -1),
+							node,
+							startOffset,
+							endOffset: endOffset - 1,
+						} as const
+
+						state.truncatedTrailingSpaceFromItem = item
+
+						items.push(item)
+					} else {
+						items.push({ kind: 'text', content: text, node, startOffset, endOffset })
+					}
 				}
 			}
 		} else {
@@ -351,7 +388,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 		if (node.tagName === 'BR') {
 			// Step 5: If node is a br element, then append a string containing a single U+000A
 			// LF code point to items.
-			state.truncatedTrailingSpaceFromTextNode = null
+			state.truncatedTrailingSpaceFromItem = null
 			state.mayStartWithWhitespace = true
 			items.push({ kind: 'text', content: '\n', node, startOffset: 0, endOffset: 0 })
 
@@ -397,7 +434,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 				if (!state.firstTableCell) {
 					items.push({ kind: 'text', content: '\t', node, startOffset: 0, endOffset: 0 })
 					// Make sure we don't add a white-space we removed from the previous node
-					state.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromItem = null
 				}
 				state.firstTableCell = false
 				state.withinTableContent = true
@@ -411,7 +448,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 				if (!state.firstTableRow) {
 					items.push({ kind: 'text', content: '\n', node, startOffset: 0, endOffset: 0 })
 					// Make sure we don't add a white-space we removed from the previous node
-					state.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromItem = null
 				}
 				state.firstTableRow = false
 				state.firstTableCell = true
@@ -437,9 +474,9 @@ function renderedTextCollectionSteps(node: Node, params: {
 				// InlineBlock's are a bit strange, in that they don't produce a Linebreak, yet
 				// disable white space truncation before and after it, making it one of the few
 				// cases where one can have multiple white space characters following one another.
-				if (state.truncatedTrailingSpaceFromTextNode) {
+				if (state.truncatedTrailingSpaceFromItem != null) {
 					items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
-					state.truncatedTrailingSpaceFromTextNode = null
+					state.truncatedTrailingSpaceFromItem = null
 					state.mayStartWithWhitespace = true
 				}
 				break
@@ -466,7 +503,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 				node,
 				offset: isEnd ? node.childNodes.length : 0,
 			})
-			state.truncatedTrailingSpaceFromTextNode = null
+			state.truncatedTrailingSpaceFromItem = null
 			state.mayStartWithWhitespace = true
 		}
 
@@ -475,9 +512,9 @@ function renderedTextCollectionSteps(node: Node, params: {
 		// space, since for example <span>asd <input> qwe</span> must
 		// produce "asd  qwe" (note the 2 spaces)
 		if (is.ignorableTagName(tagName)) {
-			if (display !== 'block' && state.truncatedTrailingSpaceFromTextNode) {
+			if (display !== 'block' && state.truncatedTrailingSpaceFromItem) {
 				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
-				state.truncatedTrailingSpaceFromTextNode = null
+				state.truncatedTrailingSpaceFromItem = null
 			}
 			state.mayStartWithWhitespace = false
 		} else if (tagName === 'DETAILS' && !(node as HTMLDetailsElement).open) {
@@ -500,7 +537,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 			case 'inline-flex':
 			case 'inline-grid':
 			case 'inline-block': {
-				state.truncatedTrailingSpaceFromTextNode = null
+				state.truncatedTrailingSpaceFromItem = null
 				state.mayStartWithWhitespace = false
 				break
 			}
@@ -523,7 +560,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 				node,
 				offset: isEnd ? node.childNodes.length : 0,
 			})
-			state.truncatedTrailingSpaceFromTextNode = null
+			state.truncatedTrailingSpaceFromItem = null
 			state.mayStartWithWhitespace = true
 		}
 	}

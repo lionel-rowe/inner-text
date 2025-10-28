@@ -35,7 +35,7 @@ const DEFAULT_OPTIONS: Readonly<InnerTextOptions> = Object.freeze({
  */
 export class InnerText {
 	/** The individual items that make up the rendered innerText. */
-	readonly items: readonly InnerTextItem[]
+	readonly items: readonly Readonly<InnerTextItem>[]
 	/**
 	 * The rendered innerText as a string, or `undefined` if `options.mode` is `'standards'` and `target` is
 	 * unsupported.
@@ -43,13 +43,11 @@ export class InnerText {
 	readonly value: string | undefined
 
 	readonly #text: string
-	readonly #document: Document
 	#cursor = 0
 	#consumed = 0
 
 	constructor(target: Node, options?: InnerTextOptions) {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
-		this.#document = target.ownerDocument ?? globalThis.document
 
 		if (opts.mode === 'standards' && is.element(target)) {
 			if (is.unsupportedTagName(target.tagName)) {
@@ -97,7 +95,7 @@ export class InnerText {
 			throw new InnerTextRangeError(`startIndex ${startIndex} is greater than endIndex ${endIndex}`)
 		}
 
-		const range = this.#document.createRange()
+		const range = new Range()
 
 		let result = this.#seek(startIndex)
 		let start: NodeOffsetResult
