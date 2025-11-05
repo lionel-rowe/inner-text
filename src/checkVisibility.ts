@@ -4,21 +4,24 @@ export function checkVisibility(relativeToRect: DOMRectReadOnly) {
 	const adjust = relativeTo(relativeToRect)
 
 	return (el: Element) => {
-		if (el.checkVisibility?.() === false) return false
-
 		// Always consider BR elements visible, regardless of bounding box
 		if (el.nodeName === 'BR') return true
 
-		const rect = el.getBoundingClientRect()
-		if (rect.width === 0 || rect.height === 0) return false
-		if (isOffscreen(rect, adjust)) return false
-
 		const style = getComputedStyle(el)
 
-		return !(
-			parseInt(style.opacity) === 0 ||
-			style.clip === 'rect(0px, 0px, 0px, 0px)'
-		)
+		// Other checks such as `Element#checkVisibility()` give a false negative if style.display is `contents`
+		// (because the element itself is not visible, even though its contents are). However, in our case, it's the
+		// contents we care about, not the bounding box.
+		if (style.display === 'contents') return true
+
+		if (el.checkVisibility?.({ opacityProperty: true }) === false) return false
+
+		const rect = el.getBoundingClientRect()
+		if (rect.width === 0 || rect.height === 0 && style.visibility !== 'visible') return false
+
+		if (isOffscreen(rect, adjust)) return false
+
+		return style.clip !== 'rect(0px, 0px, 0px, 0px)'
 	}
 }
 

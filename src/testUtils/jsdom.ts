@@ -35,6 +35,13 @@ function getDisplay(element: Element): string | null {
 	unimplemented(`${getDisplay.name}: ${element.tagName}`)
 }
 
+type WindowProp = keyof typeof JSDOM.prototype['window'] & keyof typeof globalThis
+
+const skipPatch = new Set<WindowProp>([
+	// liable to cause `RangeError: Maximum call stack size exceeded` in some scenarios
+	'performance',
+])
+
 export class JsDom extends JSDOM implements Disposable {
 	readonly #stack = new DisposableStack();
 	[Symbol.dispose]() {
@@ -48,8 +55,10 @@ export class JsDom extends JSDOM implements Disposable {
 	}
 
 	#patchGlobals() {
-		for (const k of Reflect.ownKeys(this.window) as (keyof typeof this.window & keyof typeof globalThis)[]) {
+		for (const k of Reflect.ownKeys(this.window) as WindowProp[]) {
 			try {
+				if (skipPatch.has(k)) continue
+
 				const v = this.window[k]
 				if (globalThis[k] === v) continue
 				this.#stack.use(stubProperty(globalThis, k, this.window[k]))
@@ -62,17 +71,10 @@ export class JsDom extends JSDOM implements Disposable {
 
 	#patchSelf() {
 		const { window } = this
-		const { getComputedStyle, Element, HTMLElement, HTMLHtmlElement, DOMRect, Error, Range: _Range, document } =
-			window
-		const errorIsError = globalThis.Error.isError
-
-		// https://github.com/jsdom/jsdom/issues/3973
-		Error.isError = (e): e is Error => {
-			return errorIsError(e) || e instanceof Error
-		}
+		const { getComputedStyle, Element, HTMLElement, HTMLHtmlElement, DOMRect, document } = window
 
 		// better error message for debugging
-		class Range extends _Range {
+		class Range extends window.Range {
 			override setStart(node: Node, offset: number) {
 				return this.#set('Start', node, offset)
 			}
@@ -85,11 +87,14 @@ export class JsDom extends JSDOM implements Disposable {
 					super[`set${position}`](node, offset)
 				} catch (e) {
 					if (isDomException(e, 'IndexSizeError')) {
-						const serializedNode = is.text(node)
+						const serializedNode = is.nodeType.text(node)
 							? JSON.stringify(node.data.length > 15 ? `${node.data.slice(0, 12)}...` : node.data)
 							: `<${node.nodeName}>`
 
-						throw new DOMException(`${e.message} set${position}(${serializedNode}, ${offset})`, e.name)
+						throw new DOMException(
+							`${e.message.replace(/.?$/, ':')} set${position}(${serializedNode}, ${offset})`,
+							e.name,
+						)
 					}
 
 					throw e

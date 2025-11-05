@@ -1,23 +1,20 @@
-import { InnerText } from './InnerText.ts'
+import { DEFAULT_OPTIONS, InnerText, InnerTextOptions } from './InnerText.ts'
 
 /** A registry managing cached {@linkcode InnerText} instances for DOM nodes. */
-class InnerTextRegistry {
-	#registry = new WeakMap<Node, InnerText>()
-	#staleNodes = new WeakSet<Node>()
+export class InnerTextRegistry {
+	readonly #registry = new WeakMap<Node, InnerText>()
+	readonly #options: InnerTextOptions
+
+	constructor(options?: Partial<InnerTextOptions>) {
+		this.#options = { ...DEFAULT_OPTIONS, ...options }
+	}
 
 	/** Get the {@linkcode InnerText} for a given node, creating or refreshing it as necessary. */
 	get(node: Node): InnerText {
-		if (this.#staleNodes.has(node)) {
-			const innerText = new InnerText(node)
-			this.#registry.set(node, innerText)
-			this.#staleNodes.delete(node)
-			return innerText
-		}
-
 		const current = this.#registry.get(node)
 		if (current != null) return current
 
-		const innerText = new InnerText(node)
+		const innerText = new InnerText(node, this.#options)
 		this.#registry.set(node, innerText)
 		return innerText
 	}
@@ -27,9 +24,6 @@ class InnerTextRegistry {
 	 * For example, this can be called when the node's content changes as observed by a `MutationObserver`.
 	 */
 	markStale(node: Node): void {
-		this.#staleNodes.add(node)
+		this.#registry.delete(node)
 	}
 }
-
-/** The global {@linkcode InnerTextRegistry} instance. */
-export const innerTextRegistry: InnerTextRegistry = new InnerTextRegistry()

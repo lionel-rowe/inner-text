@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertStrictEquals, assertThrows } from '@std/assert'
+import { assertEquals, assertStrictEquals, assertThrows } from '@std/assert'
 import dedent from 'core-js-pure/full/string/dedent.js'
 import { InnerText, InnerTextRangeError } from './InnerText.ts'
 import { JsDom } from './testUtils/jsdom.ts'

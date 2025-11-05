@@ -35,7 +35,7 @@ const DEFAULT_START_STATE: Readonly<RenderedTextCollectionState> = Object.freeze
 })
 
 function getLocaleForNode(node: Node) {
-	let element: Element | null = is.element(node) ? node : node.parentElement
+	let element: Element | null = is.nodeType.element(node) ? node : node.parentElement
 	while (element) {
 		const lang = element.getAttribute('lang')
 		if (lang != null) {
@@ -213,7 +213,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 
 	if (!node.isConnected) return
 
-	if (is.text(node)) {
+	if (is.nodeType.text(node)) {
 		const { parentElement } = node
 
 		if (parentElement != null) {
@@ -222,7 +222,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 			if (state.withinSvg && !state.withinSvgText) return
 
 			// Any text contained in these elements must be ignored.
-			if (is.ignorableTagName(tagName)) {
+			if (is.tag.ignorable(tagName)) {
 				return
 			}
 
@@ -263,14 +263,14 @@ function renderedTextCollectionSteps(node: Node, params: {
 			if (display === 'none') {
 				// Even if set to display: none, Option/OptGroup elements need to
 				// be rendered.
-				if (!is.optionTagName(tagName)) return
+				if (!is.tag.option(tagName)) return
 			}
 
 			const { textContent } = node
 
 			const whiteSpaceCollapse = computedStyle.whiteSpaceCollapse
 			const preserveWhitespace = whiteSpaceCollapse === 'preserve'
-			const isInline = is.inlineBlockLikeStyle(display)
+			const isInline = is.style.inlineBlockLike(display)
 
 			// Now we need to decide on whether to remove beginning white space or not, this
 			// is mainly decided by the elements we rendered before, but may be overwritten by the white-space
@@ -360,7 +360,8 @@ function renderedTextCollectionSteps(node: Node, params: {
 				endOffset: node.textContent.length,
 			})
 		}
-	} else if (is.element(node)) {
+	} else if (is.nodeType.element(node)) {
+		// We're using JS so by definition NOSCRIPT won't be rendered
 		if (node.tagName === 'NOSCRIPT') return
 		if (options.mode === 'visual' && !checkVisibility(node)) return
 
@@ -493,7 +494,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 
 		// Option/OptGroup elements should go on separate lines, by treating them like
 		// Block elements we can achieve that.
-		if (is.optionTagName(tagName)) surroundingLineBreaks = 1
+		if (is.tag.option(tagName)) surroundingLineBreaks = 1
 
 		if (surroundingLineBreaks > 0) {
 			const isEnd = checkVisited(node)
@@ -511,7 +512,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 		// However we still need to check whether we have to prepend a
 		// space, since for example <span>asd <input> qwe</span> must
 		// produce "asd  qwe" (note the 2 spaces)
-		if (is.ignorableTagName(tagName)) {
+		if (is.tag.ignorable(tagName)) {
 			if (display !== 'block' && state.truncatedTrailingSpaceFromItem) {
 				items.push({ kind: 'text', content: ' ', node, startOffset: 0, endOffset: 0 })
 				state.truncatedTrailingSpaceFromItem = null

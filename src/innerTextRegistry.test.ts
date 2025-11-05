@@ -1,6 +1,8 @@
 import { assertEquals, assertNotStrictEquals, assertStrictEquals } from '@std/assert'
-import { innerTextRegistry } from './innerTextRegistry.ts'
+import { InnerTextRegistry } from './innerTextRegistry.ts'
 import { JsDom } from './testUtils/jsdom.ts'
+
+const innerTextRegistry = new InnerTextRegistry()
 
 Deno.test('stale logic with MutationObserver', () => {
 	using _ = new JsDom('<div>Hello, world!</div>')

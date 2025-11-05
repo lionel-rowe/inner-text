@@ -25,7 +25,7 @@ export type InnerTextOptions = {
 	mode: 'standards' | 'visual'
 }
 
-const DEFAULT_OPTIONS: Readonly<InnerTextOptions> = Object.freeze({
+export const DEFAULT_OPTIONS: Readonly<InnerTextOptions> = Object.freeze({
 	mode: 'visual',
 })
 
@@ -37,8 +37,8 @@ export class InnerText {
 	/** The individual items that make up the rendered innerText. */
 	readonly items: readonly Readonly<InnerTextItem>[]
 	/**
-	 * The rendered innerText as a string, or `undefined` if `options.mode` is `'standards'` and `target` is
-	 * unsupported.
+	 * The rendered innerText as a string, or `undefined` if `options.mode` is `'standards'` and the `target` node is
+	 * not an `HTMLElement`.
 	 */
 	readonly value: string | undefined
 
@@ -46,16 +46,18 @@ export class InnerText {
 	#cursor = 0
 	#consumed = 0
 
-	constructor(target: Node, options?: InnerTextOptions) {
+	constructor(target: Node, options?: Partial<InnerTextOptions>) {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
 
-		if (opts.mode === 'standards' && is.element(target)) {
-			if (is.unsupportedTagName(target.tagName)) {
+		if (opts.mode === 'standards') {
+			if (!is.webIdl.htmlElement(target)) {
 				this.items = []
 				this.#text = ''
 				this.value = undefined
 				return
-			} else if (getComputedStyle(target).display === 'none' && !is.ignorableTagName(target.tagName)) {
+			}
+
+			if (getComputedStyle(target).display === 'none' && !is.tag.ignorable(target.tagName)) {
 				const text = target.textContent
 				this.items = [{
 					kind: 'text',
