@@ -23,10 +23,13 @@ export type InnerTextOptions = {
 	 * @default {'visual'}
 	 */
 	mode: 'standards' | 'visual'
+	/** A custom whitelist function to include/exclude certain elements from the rendered innerText. */
+	include: (el: Element) => boolean
 }
 
 export const DEFAULT_OPTIONS: Readonly<InnerTextOptions> = Object.freeze({
 	mode: 'visual',
+	include: () => true,
 })
 
 /**

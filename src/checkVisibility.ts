@@ -1,18 +1,18 @@
 type RectAdjuster = (rect: DOMRectReadOnly) => DOMRectReadOnly
 
-export function checkVisibility(relativeToRect: DOMRectReadOnly) {
+export function checkVisibility(relativeToRect: DOMRectReadOnly, include: (el: Element) => boolean) {
 	const adjust = relativeTo(relativeToRect)
 
 	return (el: Element) => {
 		// Always consider BR elements visible, regardless of bounding box
-		if (el.nodeName === 'BR') return true
+		if (el.nodeName === 'BR') return include(el)
 
 		const style = getComputedStyle(el)
 
 		// Other checks such as `Element#checkVisibility()` give a false negative if style.display is `contents`
 		// (because the element itself is not visible, even though its contents are). However, in our case, it's the
 		// contents we care about, not the bounding box.
-		if (style.display === 'contents') return true
+		if (style.display === 'contents') return include(el)
 
 		if (el.checkVisibility?.({ opacityProperty: true }) === false) return false
 
@@ -21,7 +21,7 @@ export function checkVisibility(relativeToRect: DOMRectReadOnly) {
 
 		if (isOffscreen(rect, adjust)) return false
 
-		return style.clip !== 'rect(0px, 0px, 0px, 0px)'
+		return style.clip !== 'rect(0px, 0px, 0px, 0px)' && include(el)
 	}
 }
 

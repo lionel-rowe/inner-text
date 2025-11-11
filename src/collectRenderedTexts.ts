@@ -174,13 +174,19 @@ function isWhitespace(char: string): boolean {
 
 export function collectRenderedTexts(node: Node, options: InnerTextOptions): InnerTextItem[] {
 	const items: InnerTextItem[] = []
+
+	const filter = options.mode === 'visual'
+		? checkVisibility(
+			(node.ownerDocument ?? globalThis.document).documentElement.getBoundingClientRect(),
+			options.include,
+		)
+		: options.include
+
 	renderedTextCollectionSteps(node, {
 		state: { ...DEFAULT_START_STATE },
 		items,
 		options,
-		checkVisibility: checkVisibility(
-			(node.ownerDocument ?? globalThis.document).documentElement.getBoundingClientRect(),
-		),
+		filter,
 	})
 	return condenseInnerTextItems(items)
 }
@@ -196,9 +202,9 @@ function renderedTextCollectionSteps(node: Node, params: {
 	state: RenderedTextCollectionState
 	items: InnerTextItem[]
 	options: InnerTextOptions
-	checkVisibility: (el: Element) => boolean
+	filter: (el: Element) => boolean
 }): void {
-	const { state, items, options, checkVisibility } = params
+	const { state, items, options, filter } = params
 
 	// Step 1. Let items be the result of running the rendered text collection
 	// steps with each child node of node in tree order,
@@ -363,7 +369,7 @@ function renderedTextCollectionSteps(node: Node, params: {
 	} else if (is.nodeType.element(node)) {
 		// We're using JS so by definition NOSCRIPT won't be rendered
 		if (node.tagName === 'NOSCRIPT') return
-		if (options.mode === 'visual' && !checkVisibility(node)) return
+		if (!filter(node)) return
 
 		if (state.withinSvg) {
 			if (node.tagName === 'defs') return
