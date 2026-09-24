@@ -231,15 +231,20 @@ Deno.test('readme', () => {
 	assertEquals(range.toString(), 'A [hidden text] B\n\t\n\tC\n\t')
 })
 
-Deno.test('details/summary', () => {
-	using _ = new JsDom('<details><summary>Title</summary>Content</details>')
+Deno.test('details/summary', async (t) => {
+	await t.step('closed', () => {
+		using _ = new JsDom('<details><summary>Title</summary>Content</details>')
 
-	const $details = document.querySelector('details')!
+		const $details = document.querySelector('details')!
+		assertEquals(new InnerText($details).toString(), 'Title')
+	})
 
-	assertEquals(new InnerText($details).toString(), 'Title')
+	await t.step('open', () => {
+		using _ = new JsDom('<details open><summary>Title</summary>Content</details>')
 
-	$details.open = true
-	assertEquals(new InnerText($details).toString(), 'Title\nContent')
+		const $details = document.querySelector('details')!
+		assertEquals(new InnerText($details).toString(), 'Title\nContent')
+	})
 })
 
 Deno.test('unrecognized elements', () => {

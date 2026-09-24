@@ -5,21 +5,33 @@ export function checkVisibility(relativeToRect: DOMRectReadOnly, include: (el: E
 
 	return (el: Element) => {
 		// Always consider BR elements visible, regardless of bounding box
-		if (el.nodeName === 'BR') return include(el)
+		if (el.nodeName === 'BR') {
+			return include(el)
+		}
 
 		const style = getComputedStyle(el)
 
 		// Other checks such as `Element#checkVisibility()` give a false negative if style.display is `contents`
 		// (because the element itself is not visible, even though its contents are). However, in our case, it's the
 		// contents we care about, not the bounding box.
-		if (style.display === 'contents') return include(el)
+		if (style.display === 'contents') {
+			return include(el)
+		}
 
-		if (el.checkVisibility?.({ opacityProperty: true }) === false) return false
+		if (el.checkVisibility?.({ opacityProperty: true }) === false) {
+			return false
+		}
 
 		const rect = el.getBoundingClientRect()
-		if (rect.width === 0 || rect.height === 0 && style.visibility !== 'visible') return false
+		if (rect.width === 0 || rect.height === 0 && style.visibility !== 'visible') {
+			return false
+		}
 
-		if (isOffscreen(rect, adjust)) return false
+		// // This fails for scrolled panes.
+		// // TODO: maybe re-add (if possible to distinguish scrolled panes from always-offscreen elements)?
+		// if (isOffscreen(rect, adjust)) {
+		// 	return false
+		// }
 
 		return style.clip !== 'rect(0px, 0px, 0px, 0px)' && include(el)
 	}

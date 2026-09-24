@@ -1,7 +1,7 @@
 {
 	"lock": false,
 	"name": "@li/inner-text",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"exports": {
 		".": "./src/mod.ts"
 	},
@@ -9,7 +9,7 @@
 		"test": "deno test -RE src",
 		"build": "deno bundle src/mod.ts -o src/fixtures/script.mjs",
 		"start": {
-			"command": "file-server src/fixtures",
+			"command": "deno run --allow-net --allow-read jsr:@std/http/file-server src/fixtures",
 			"dependencies": ["build"]
 		}
 	},

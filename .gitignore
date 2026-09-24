@@ -1,3 +1,5 @@
 .env
 _junk
 src/fixtures/script.mjs
+src/fixtures/indeed.html
+src/fixtures/indeed_files
